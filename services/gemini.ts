@@ -1,3 +1,4 @@
+
 import { GoogleGenAI, Type, GenerateContentResponse } from "@google/genai";
 import { SkillDomain, SkillDNAScore, AntiCheatLog, ExamMCQ, ExamTheory, ExamPractical, ChallengeCheckpoint } from '../types';
 
@@ -6,7 +7,6 @@ let aiClient: GoogleGenAI | null = null;
 
 const getAiClient = () => {
   if (!aiClient) {
-    // Fallback key prevents constructor error, actual calls will fail gracefully with auth error later
     const key = process.env.API_KEY || 'PLACEHOLDER_KEY'; 
     aiClient = new GoogleGenAI({ apiKey: key });
   }
@@ -49,17 +49,17 @@ export const analyzeEnvironmentSnapshot = async (
 ): Promise<{ lighting: boolean; singlePerson: boolean; noDevices: boolean; feedback: string }> => {
   try {
     const ai = getAiClient();
-    // STRICT ROBOTIC PROCTOR PROMPT
     const prompt = `
-      Role: Autonomous Exam Proctor System.
-      Task: Analyze visual telemetry for security violations.
+      Role: Autonomous Technical Interview Proctor (Security Class).
+      Task: Perform deep-scan analysis of the visual telemetry to identify security and integrity violations.
       
-      VIOLATION CRITERIA (Zero Tolerance):
-      1. Lighting: FAIL if face is under-exposed, over-exposed (histogram clipping), or unevenly lit.
-      2. Identity: FAIL if face count != 1. FAIL if face is not fully frontal (+/- 15 degrees).
-      3. Objects: FAIL if phone, tablet, secondary screen, or unauthorized peripheral is detected.
+      VIOLATION PROTOCOLS:
+      1. Lighting & Visibility: FAIL if face is obscured.
+      2. Identity & Presence: FAIL if human count != 1.
+      3. Electronic Devices: FAIL if smartphones/tablets/monitors detected.
+      4. Communication Tools: FAIL if non-standard headsets detected.
       
-      OUTPUT: Boolean states only. Ambiguity = FAIL.
+      OUTPUT: Valid JSON. Justify feedback technically.
     `;
 
     const base64Data = imageBase64.replace(/^data:image\/(png|jpeg|jpg);base64,/, "");
@@ -73,7 +73,7 @@ export const analyzeEnvironmentSnapshot = async (
         ]
       },
       config: {
-        temperature: 0, // MAX DETERMINISM
+        temperature: 0,
         responseMimeType: "application/json",
         responseSchema: {
           type: Type.OBJECT,
@@ -92,23 +92,20 @@ export const analyzeEnvironmentSnapshot = async (
 
   } catch (error) {
     console.error("Proctoring Check Failed:", error);
-    // FAIL SECURE: If AI fails, deny access.
     return {
       lighting: false,
       singlePerson: false,
       noDevices: false,
-      feedback: "Telemetry analysis failed. Security check unsuccessful."
+      feedback: "Security analysis engine error."
     };
   }
 };
 
-// --- SKILL TRIAL (EXACTLY 10 QUESTIONS) ---
+// --- SKILL TRIAL ---
 
 export const generateSkillTrial = async (domain: SkillDomain): Promise<{ questions: {id: number, text: string}[], constraints: string[] }> => {
     const ai = getAiClient();
-    const prompt = `Generate exactly 10 high-difficulty, skill-specific interview questions for ${domain}. 
-    Difficulty: Senior/Principal Engineer. 
-    Format: Deterministic JSON.`;
+    const prompt = `Generate exactly 10 high-difficulty interview questions for ${domain}. Level: Senior/Principal.`;
     
     const response = await withRetry<GenerateContentResponse>(() => ai.models.generateContent({
         model: REASONING_MODEL,
@@ -150,16 +147,10 @@ export const evaluatePerformance = async (
     antiCheat: AntiCheatLog
 ): Promise<{ score: SkillDNAScore; feedback: string }> => {
     const ai = getAiClient();
-    const prompt = `Evaluate execution for ${domain}. 
-    Strictness: Production Grade. 
-    No partial credit for logic errors.
-    
+    const prompt = `Evaluate execution for ${domain}. Strictness: Production Grade. 
     Task: ${taskSummary}
     Solution: ${solutionSummary}
-    Reasoning: ${userReasoning}
-    Time Spent: ${timeSpent}s
-    Telemetry: ${JSON.stringify(antiCheat)}
-    `;
+    Reasoning: ${userReasoning}`;
 
     const response = await withRetry<GenerateContentResponse>(() => ai.models.generateContent({
         model: REASONING_MODEL,
@@ -190,13 +181,16 @@ export const evaluatePerformance = async (
     return parseResponse(response.text);
 };
 
-// --- COMPETITIVE EXAM GENERATION (STRICT COUNTS) ---
+// --- COMPETITIVE EXAM GENERATION (ULTRA-RIGOROUS) ---
 
 export const generateExamMCQs = async (domain: SkillDomain): Promise<ExamMCQ[]> => {
     const ai = getAiClient();
-    const prompt = `Generate exactly 20 Multiple Choice Questions (MCQs) for ${domain}.
-    Level: Expert.
-    Distractor Logic: High plausibility. No obvious wrong answers.`;
+    const prompt = `Generate exactly 20 Multiple Choice Questions (MCQs) for a Competitive Certification Exam in ${domain}.
+    Difficulty Level: Staff/Principal Engineer.
+    Rules:
+    - Questions must cover obscure edge cases, low-level optimizations, and complex protocol internals.
+    - Options must include highly plausible distractors that penalize surface-level knowledge.
+    - Format: Deterministic JSON.`;
     
     const response = await withRetry<GenerateContentResponse>(() => ai.models.generateContent({
         model: REASONING_MODEL,
@@ -228,13 +222,14 @@ export const generateExamMCQs = async (domain: SkillDomain): Promise<ExamMCQ[]> 
         }
     }));
     const parsed = parseResponse(response.text);
-    return (parsed.questions || []).slice(0, 20); // Force 20
+    return (parsed.questions || []).slice(0, 20);
 };
 
 export const generateExamTheory = async (domain: SkillDomain): Promise<ExamTheory[]> => {
      const ai = getAiClient();
-     const prompt = `Generate exactly 30 Theory/Architecture questions for ${domain}.
-     Focus: System Design, Scalability, Trade-offs.`;
+     const prompt = `Generate exactly 30 Deep Theory/Architecture questions for a Competitive Exam in ${domain}.
+     Focus: Distributed systems trade-offs, scalability bottlenecks, security vector analysis, and complex data consistency models.
+     Format: Deterministic JSON.`;
      
      const response = await withRetry<GenerateContentResponse>(() => ai.models.generateContent({
         model: REASONING_MODEL,
@@ -261,13 +256,13 @@ export const generateExamTheory = async (domain: SkillDomain): Promise<ExamTheor
         }
     }));
     const parsed = parseResponse(response.text);
-    return (parsed.questions || []).slice(0, 30); // Force 30
+    return (parsed.questions || []).slice(0, 30);
 };
 
 export const generateExamPractical = async (domain: SkillDomain): Promise<ExamPractical[]> => {
     const ai = getAiClient();
-    const prompt = `Generate exactly 10 Practical Coding/Engineering tasks for ${domain}.
-    Environment: Sandbox-ready constraints.`;
+    const prompt = `Generate exactly 10 Practical Coding/System tasks for ${domain}.
+    Level: Expert. Constraints must involve high-concurrency, memory-efficiency, and strict API compliance.`;
     
     const response = await withRetry<GenerateContentResponse>(() => ai.models.generateContent({
         model: REASONING_MODEL,
@@ -298,26 +293,28 @@ export const generateExamPractical = async (domain: SkillDomain): Promise<ExamPr
         }
     }));
     const parsed = parseResponse(response.text);
-    return (parsed.tasks || []).slice(0, 10); // Force 10
+    return (parsed.tasks || []).slice(0, 10);
 };
 
 export const gradeExamSections = async (domain: SkillDomain, theory: ExamTheory[], practical: ExamPractical[]): Promise<{ theoryScore: number, practicalScore: number, feedback: string }> => {
     const ai = getAiClient();
-    const prompt = `Grade ${domain} Exam.
-    Theory Input: ${JSON.stringify(theory)}
-    Practical Input: ${JSON.stringify(practical)}
+    const prompt = `ACT AS A SENIOR CERTIFICATION BOARD. Grade the following ${domain} Exam with extreme rigor. 
     
-    Grading Rules:
-    - Semantic Similarity Matching for Theory.
-    - Logic Correctness for Practical.
-    - Strict adherence to constraints.
-    - 0-100 Integer Score per section.`;
+    THEORY INPUT: ${JSON.stringify(theory)}
+    PRACTICAL INPUT: ${JSON.stringify(practical)}
+    
+    GRADING PROTOCOL:
+    - Zero tolerance for hand-wavy architecture answers.
+    - Code must solve the primary constraint to receive > 50%.
+    - Penalize solutions with known security vulnerabilities (OWASP top 10).
+    - Ensure feedback is precise, robotic, and highlights exactly why points were deducted.`;
 
     const response = await withRetry<GenerateContentResponse>(() => ai.models.generateContent({
         model: REASONING_MODEL,
         contents: prompt,
         config: {
             responseMimeType: "application/json",
+            thinkingConfig: { thinkingBudget: 16384 },
             responseSchema: {
                 type: Type.OBJECT,
                 properties: {
@@ -336,9 +333,7 @@ export const gradeExamSections = async (domain: SkillDomain, theory: ExamTheory[
 
 export const generateInterviewQuestion = async (domain: SkillDomain, lastScore: number, roundNum: number): Promise<{ text: string, timeLimit: number }> => {
      const ai = getAiClient();
-     const prompt = `Generate Question #${roundNum}/20 for ${domain}. 
-     Adaptive Difficulty: Previous Score was ${lastScore}.
-     Return time limit in seconds (30-90).`;
+     const prompt = `Generate Question #${roundNum}/20 for ${domain}. Difficulty based on score ${lastScore}.`;
      
      const response = await withRetry<GenerateContentResponse>(() => ai.models.generateContent({
         model: GENERATION_MODEL,
@@ -360,15 +355,7 @@ export const generateInterviewQuestion = async (domain: SkillDomain, lastScore: 
 
 export const evaluateInterviewResponse = async (domain: SkillDomain, question: string, answer: string): Promise<{ score: number, feedback: string, spokenFeedback: string }> => {
     const ai = getAiClient();
-    const prompt = `Evaluate Spoken Response for ${domain}.
-    Question: ${question}
-    Answer (ASR Transcript): ${answer}
-    
-    Analysis:
-    - Technical Accuracy (Weight 60%)
-    - Communication Clarity (Weight 40%)
-    - Intent Analysis.
-    `;
+    const prompt = `Evaluate Spoken Response for ${domain}. Q: ${question} A: ${answer}`;
     
     const response = await withRetry<GenerateContentResponse>(() => ai.models.generateContent({
         model: GENERATION_MODEL,
@@ -426,9 +413,7 @@ export const generateChallengeScenario = async (domain: SkillDomain): Promise<{ 
 
 export const validateChallengeStep = async (domain: SkillDomain, stepTitle: string, code: string): Promise<{ success: boolean, score: number, feedback: string }> => {
     const ai = getAiClient();
-    const prompt = `Validate code against checkpoint "${stepTitle}" in ${domain}. 
-    Code: ${code}
-    Output: Deterministic Boolean Success.`;
+    const prompt = `Validate code against checkpoint "${stepTitle}" in ${domain}. Code: ${code}`;
     
     const response = await withRetry<GenerateContentResponse>(() => ai.models.generateContent({
         model: GENERATION_MODEL,

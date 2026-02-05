@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { SkillDomain } from '../types';
 import { generateInterviewQuestion, evaluateInterviewResponse, analyzeEnvironmentSnapshot } from '../services/gemini';
-import { Video, VideoOff, Timer, ShieldAlert, CheckCircle, ChevronRight, BarChart2, Cpu, Mic, Sun, User as UserIcon, Smartphone, Loader2, XCircle, RotateCw } from 'lucide-react';
+import { Video, VideoOff, Timer, ShieldAlert, CheckCircle, ChevronRight, BarChart2, Cpu, Mic, Sun, User as UserIcon, Smartphone, Loader2, XCircle, RotateCw, ShieldCheck } from 'lucide-react';
 
 interface Props {
   onComplete: (data: any) => void;
@@ -18,13 +18,12 @@ export const InterviewRoom: React.FC<Props> = ({ onComplete }) => {
   const [domain, setDomain] = useState<SkillDomain>(SkillDomain.ALGORITHMS);
   const [hasPermissions, setHasPermissions] = useState(false);
   const [stream, setStream] = useState<MediaStream | null>(null);
-  const [status, setStatus] = useState<'setup' | 'scan_360' | 'intro' | 'active' | 'evaluating' | 'summary'>('setup');
+  const [status, setStatus] = useState<'setup' | 'intro' | 'active' | 'evaluating' | 'summary'>('setup');
   
   // Environment Check State
   const [isAnalyzingEnv, setIsAnalyzingEnv] = useState(false);
   const [envCheck, setEnvCheck] = useState<{lighting: boolean; singlePerson: boolean; noDevices: boolean; feedback: string} | null>(null);
   const [currentRoundViolations, setCurrentRoundViolations] = useState<string[]>([]);
-  const [scanComplete, setScanComplete] = useState(false);
 
   // AI State
   const [aiState, setAiState] = useState<'idle' | 'speaking_question' | 'listening' | 'processing' | 'speaking_feedback'>('idle');
@@ -89,7 +88,7 @@ export const InterviewRoom: React.FC<Props> = ({ onComplete }) => {
         videoRef.current.srcObject = mediaStream;
       }
     } catch (err) {
-      alert("Camera and Microphone permissions are required.");
+      alert("Camera and Microphone permissions are required for the AI Proctor to function.");
     }
   };
 
@@ -115,24 +114,13 @@ export const InterviewRoom: React.FC<Props> = ({ onComplete }) => {
          setEnvCheck(result);
        }
     } catch (e) {
-       setEnvCheck({ lighting: false, singlePerson: false, noDevices: false, feedback: "Error." });
+       setEnvCheck({ lighting: false, singlePerson: false, noDevices: false, feedback: "Neural analysis system encountered an error. Please retry." });
     } finally {
        setIsAnalyzingEnv(false);
     }
   };
 
-  // 360 Scan Step
-  const performScan = () => {
-     // Simulate user rotating logic
-     setStatus('scan_360');
-  };
-
-  const confirmScan = () => {
-      setScanComplete(true);
-      setStatus('setup'); // Go back to verify lighting one last time
-  };
-
-  // 1.5 CONTINUOUS MONITORING
+  // 1.5 CONTINUOUS MONITORING (EVERY 4 SECONDS)
   useEffect(() => {
     let monitorInterval: any;
     const performCheck = async () => {
@@ -148,16 +136,17 @@ export const InterviewRoom: React.FC<Props> = ({ onComplete }) => {
           const base64 = canvas.toDataURL('image/jpeg', 0.6); 
           analyzeEnvironmentSnapshot(base64).then(result => {
              const violations: string[] = [];
-             if (!result.lighting) violations.push("Poor Lighting / Face Obscured");
-             if (!result.singlePerson) violations.push("Presence Check Failed (Must be 1 person)");
-             if (!result.noDevices) violations.push("Prohibited Device Detected");
+             if (!result.lighting) violations.push("Lighting Violation: Facial features obscured.");
+             if (!result.singlePerson) violations.push("Identity Violation: Multiple persons or absence detected.");
+             if (!result.noDevices) violations.push("Device Violation: Unauthorized electronic device in frame.");
              if (violations.length > 0) {
                  setCurrentRoundViolations(prev => Array.from(new Set([...prev, ...violations])));
              }
-          }).catch(e => console.warn("Proctor check skipped:", e));
+          }).catch(e => console.warn("Proctor heartbeat failed:", e));
         }
       } catch (e) {}
     };
+
     if (status === 'active' || status === 'evaluating') {
        monitorInterval = setInterval(performCheck, 4000);
     }
@@ -170,11 +159,11 @@ export const InterviewRoom: React.FC<Props> = ({ onComplete }) => {
     const handleCopyPaste = (e: ClipboardEvent) => e.preventDefault();
     const handleVisibility = () => {
       if (document.hidden && status === 'active') {
-         speak("Warning. Please keep the tab open.");
-         setCurrentRoundViolations(prev => [...prev, "Tab Switch"]);
+         speak("INTEGRITY ALERT. Return to the interview window immediately.");
+         setCurrentRoundViolations(prev => [...prev, "Navigation Violation: Tab switching detected."]);
       }
     };
-    if (status !== 'setup' && status !== 'summary' && status !== 'scan_360') {
+    if (status !== 'setup' && status !== 'summary') {
       document.addEventListener('contextmenu', handleContext);
       document.addEventListener('copy', handleCopyPaste);
       document.addEventListener('paste', handleCopyPaste);
@@ -206,14 +195,14 @@ export const InterviewRoom: React.FC<Props> = ({ onComplete }) => {
       recognitionRef.current = recog;
       setRecognition(recog);
     } else {
-      alert("Browser not supported. Use Chrome.");
+      alert("Speech recognition is not supported in this browser. Please use a Chromium-based browser.");
     }
   }, []);
 
   // 3. GAME FLOW
   const startInterview = async () => {
     setStatus('intro');
-    speak(`Welcome to the ${domain} interview. I will ask you exactly ${QUESTIONS_COUNT} questions. No skips. Let's begin.`, () => {
+    speak(`Initiating ${domain} assessment. You will be asked ${QUESTIONS_COUNT} technical questions. The AI Proctor is active and monitoring for integrity violations. Let us begin.`, () => {
        nextQuestion(1);
     });
   };
@@ -257,14 +246,14 @@ export const InterviewRoom: React.FC<Props> = ({ onComplete }) => {
     stopListeningPhase();
     setAiState('processing');
     
-    const finalTranscript = transcript.trim() || "(No audio detected)";
+    const finalTranscript = transcript.trim() || "(System: No spoken input detected)";
     let result = await evaluateInterviewResponse(domain, currentQuestionText, finalTranscript);
     
     if (currentRoundViolations.length > 0) {
        result = {
           score: 0,
-          feedback: `VIOLATION DETECTED: ${currentRoundViolations.join(", ")}. Integrity compromised.`,
-          spokenFeedback: "Security violation detected. Zero points awarded."
+          feedback: `SECURITY VOID: Multiple integrity violations recorded: ${currentRoundViolations.join(" | ")}`,
+          spokenFeedback: "Integrity alert. This response has been invalidated due to security violations."
        };
     }
     
@@ -279,7 +268,7 @@ export const InterviewRoom: React.FC<Props> = ({ onComplete }) => {
     setLastScore(result.score); 
 
     setAiState('speaking_feedback');
-    speak(result.spokenFeedback || "Okay, moving on.", () => {
+    speak(result.spokenFeedback || "Response recorded.", () => {
        setTimeout(() => nextQuestion(round + 1), 500);
     });
   };
@@ -287,7 +276,7 @@ export const InterviewRoom: React.FC<Props> = ({ onComplete }) => {
   const finishInterview = () => {
     setStatus('summary');
     setAiState('idle');
-    speak("Interview complete. Generating your report now.");
+    speak("Assessment concluded. The AI is finalizing your Skill DNA report based on your verbal performance and proctor logs.");
   };
 
   const handleReturn = () => {
@@ -314,41 +303,28 @@ export const InterviewRoom: React.FC<Props> = ({ onComplete }) => {
   }, [aiState]);
 
   // --- RENDER ---
-  if (status === 'scan_360') {
-      return (
-         <div className="max-w-4xl mx-auto py-12 text-center animate-fade-in">
-             <RotateCw size={64} className="mx-auto text-cyan-400 mb-6 animate-spin-slow" />
-             <h1 className="text-3xl font-bold text-white mb-4">360° Environment Scan Required</h1>
-             <p className="text-slate-400 mb-8 max-w-lg mx-auto">
-                 Please slowly rotate your camera or laptop to show your entire surroundings. 
-                 Ensure no prohibited objects (phones, notes, secondary screens) are present.
-             </p>
-             <div className="w-full aspect-video bg-black rounded-xl overflow-hidden mb-8 border border-slate-700">
-                 <video ref={videoRef} autoPlay muted playsInline className="w-full h-full object-cover" />
-             </div>
-             <button 
-                onClick={confirmScan}
-                className="px-8 py-3 bg-green-600 hover:bg-green-500 text-white font-bold rounded-xl"
-             >
-                 Scan Complete - Environment Secure
-             </button>
-         </div>
-      )
-  }
-
   if (status === 'setup') {
-    const isReady = hasPermissions && envCheck?.lighting && envCheck?.singlePerson && envCheck?.noDevices && scanComplete;
+    const isReady = hasPermissions && envCheck?.lighting && envCheck?.singlePerson && envCheck?.noDevices;
 
     return (
       <div className="max-w-4xl mx-auto py-12 animate-fade-in">
-        <h1 className="text-3xl font-bold text-white mb-8 text-center">AI Voice Interview Setup</h1>
+        <div className="text-center mb-10">
+          <h1 className="text-3xl font-bold text-white mb-2">AI Voice Interview Protocol</h1>
+          <p className="text-slate-400">Environment verification and proctoring synchronization required.</p>
+        </div>
         
         <div className="grid md:grid-cols-2 gap-8">
             <div className="bg-slate-800 p-6 rounded-2xl border border-slate-700">
-               <h3 className="text-xl font-bold text-white mb-4">1. Select Domain</h3>
+               <h3 className="text-xl font-bold text-white mb-6 flex items-center gap-2">
+                 <Cpu size={20} className="text-cyan-400" /> Assessment Focus
+               </h3>
                <div className="space-y-2 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
                   {Object.values(SkillDomain).map(d => (
-                    <button key={d} onClick={() => setDomain(d)} className={`w-full text-left px-4 py-3 rounded-xl transition-all ${domain === d ? 'bg-cyan-900/40 border border-cyan-500 text-cyan-400' : 'bg-slate-700/50 hover:bg-slate-700 text-slate-300'}`}>
+                    <button 
+                      key={d} 
+                      onClick={() => setDomain(d)} 
+                      className={`w-full text-left px-4 py-3 rounded-xl transition-all border ${domain === d ? 'bg-cyan-900/40 border-cyan-500 text-cyan-400' : 'bg-slate-700/50 border-transparent hover:bg-slate-700 text-slate-300'}`}
+                    >
                         {d}
                     </button>
                   ))}
@@ -356,56 +332,73 @@ export const InterviewRoom: React.FC<Props> = ({ onComplete }) => {
             </div>
 
             <div className="space-y-6">
-                <div className="bg-slate-800 p-6 rounded-2xl border border-slate-700 flex flex-col items-center">
-                    <h3 className="text-xl font-bold text-white mb-4">2. Environment Check</h3>
-                    <div className="relative w-full aspect-video bg-black rounded-xl overflow-hidden mb-4 border border-slate-600 shadow-inner group">
+                <div className="bg-slate-800 p-6 rounded-2xl border border-slate-700 flex flex-col items-center shadow-xl">
+                    <h3 className="text-xl font-bold text-white mb-4">AI Vision Proctor</h3>
+                    <div className="relative w-full aspect-video bg-black rounded-xl overflow-hidden mb-4 border-2 border-slate-700 shadow-2xl group">
                         <video ref={videoRef} autoPlay muted playsInline className="w-full h-full object-cover transform scale-x-[-1]" />
                         {!hasPermissions && (
-                            <div className="absolute inset-0 flex items-center justify-center bg-slate-900/80 backdrop-blur-sm">
-                                <span className="text-slate-400 text-sm flex items-center gap-2">
-                                  <VideoOff size={16} /> Camera Access Needed
-                                </span>
+                            <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-900/90 backdrop-blur-md">
+                                <VideoOff size={32} className="text-slate-600 mb-2" />
+                                <span className="text-slate-400 text-sm font-medium">Camera Sync Required</span>
                             </div>
+                        )}
+                        {hasPermissions && (
+                           <div className="absolute top-2 left-2 flex items-center gap-1.5 px-2 py-1 bg-red-600/20 text-red-500 rounded border border-red-500/30 text-[10px] font-bold animate-pulse">
+                              <RotateCw size={10} /> PROCTOR LIVE
+                           </div>
                         )}
                     </div>
                     
                     {!hasPermissions ? (
-                        <button onClick={startCamera} className="w-full py-3 bg-cyan-600 hover:bg-cyan-500 text-white font-bold rounded-xl transition-colors flex items-center justify-center gap-2">
-                            <Video size={18} /> Enable Camera & Mic
-                        </button>
-                    ) : !scanComplete ? (
-                        <button onClick={performScan} className="w-full py-3 bg-purple-600 hover:bg-purple-500 text-white font-bold rounded-xl transition-colors flex items-center justify-center gap-2">
-                            <RotateCw size={18} /> Perform 360° Scan
+                        <button onClick={startCamera} className="w-full py-4 bg-cyan-600 hover:bg-cyan-500 text-white font-bold rounded-xl transition-all shadow-lg shadow-cyan-900/20 flex items-center justify-center gap-2">
+                            <Video size={18} /> Initiate Hardware Sync
                         </button>
                     ) : (
                       <div className="w-full space-y-4">
                          <div className="grid grid-cols-3 gap-2">
-                            <div className={`p-2 rounded-lg border flex flex-col items-center text-center gap-1 ${envCheck?.lighting ? 'bg-green-900/20 border-green-500 text-green-400' : 'bg-slate-700/50 border-slate-600 text-slate-400'}`}>
-                               <Sun size={20} /> <span className="text-xs font-bold">Lighting</span>
-                               {envCheck?.lighting ? <CheckCircle size={12}/> : null}
+                            <div className={`p-3 rounded-xl border flex flex-col items-center text-center gap-1.5 transition-all ${envCheck?.lighting ? 'bg-green-900/20 border-green-500 text-green-400' : 'bg-slate-900/40 border-slate-700 text-slate-500'}`}>
+                               <Sun size={20} /> <span className="text-[10px] font-bold uppercase tracking-wider">Lighting</span>
+                               {envCheck?.lighting && <CheckCircle size={14}/>}
                             </div>
-                            <div className={`p-2 rounded-lg border flex flex-col items-center text-center gap-1 ${envCheck?.singlePerson ? 'bg-green-900/20 border-green-500 text-green-400' : 'bg-slate-700/50 border-slate-600 text-slate-400'}`}>
-                               <UserIcon size={20} /> <span className="text-xs font-bold">Identity</span>
-                               {envCheck?.singlePerson ? <CheckCircle size={12}/> : null}
+                            <div className={`p-3 rounded-xl border flex flex-col items-center text-center gap-1.5 transition-all ${envCheck?.singlePerson ? 'bg-green-900/20 border-green-500 text-green-400' : 'bg-slate-900/40 border-slate-700 text-slate-500'}`}>
+                               <UserIcon size={20} /> <span className="text-[10px] font-bold uppercase tracking-wider">Identity</span>
+                               {envCheck?.singlePerson && <CheckCircle size={14}/>}
                             </div>
-                            <div className={`p-2 rounded-lg border flex flex-col items-center text-center gap-1 ${envCheck?.noDevices ? 'bg-green-900/20 border-green-500 text-green-400' : 'bg-slate-700/50 border-slate-600 text-slate-400'}`}>
-                               <Smartphone size={20} /> <span className="text-xs font-bold">Secure</span>
-                               {envCheck?.noDevices ? <CheckCircle size={12}/> : null}
+                            <div className={`p-3 rounded-xl border flex flex-col items-center text-center gap-1.5 transition-all ${envCheck?.noDevices ? 'bg-green-900/20 border-green-500 text-green-400' : 'bg-slate-900/40 border-slate-700 text-slate-500'}`}>
+                               <Smartphone size={20} /> <span className="text-[10px] font-bold uppercase tracking-wider">Devices</span>
+                               {envCheck?.noDevices && <CheckCircle size={14}/>}
                             </div>
                          </div>
-                         {!isReady && (
-                            <button onClick={analyzeEnvironment} disabled={isAnalyzingEnv} className="w-full py-3 bg-slate-700 hover:bg-slate-600 text-white font-bold rounded-xl transition-colors flex items-center justify-center gap-2 border border-slate-600">
-                              {isAnalyzingEnv ? <Loader2 size={18} className="animate-spin" /> : <ShieldAlert size={18} />}
-                              {envCheck ? "Retry Verification" : "Verify Environment"}
-                            </button>
+                         
+                         <button 
+                            onClick={analyzeEnvironment} 
+                            disabled={isAnalyzingEnv} 
+                            className={`w-full py-3 rounded-xl font-bold flex items-center justify-center gap-2 border transition-all ${isReady ? 'bg-slate-800 border-green-500/50 text-green-400 hover:bg-slate-700' : 'bg-slate-700 hover:bg-slate-600 border-slate-600 text-white'}`}
+                         >
+                           {isAnalyzingEnv ? <Loader2 size={18} className="animate-spin" /> : envCheck ? <RotateCw size={18} /> : <ShieldCheck size={18} />}
+                           {envCheck ? "Recalibrate Proctor" : "Perform Security Scan"}
+                         </button>
+
+                         {envCheck && !isReady && (
+                            <div className="p-3 bg-red-900/10 border border-red-900/40 rounded-lg text-xs text-red-300 flex gap-2">
+                               <ShieldAlert size={16} className="shrink-0" />
+                               <p>{envCheck.feedback}</p>
+                            </div>
                          )}
                       </div>
                     )}
                 </div>
 
-                <button disabled={!isReady} onClick={startInterview} className="w-full py-4 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-bold rounded-xl shadow-lg shadow-cyan-900/20 disabled:opacity-50 disabled:cursor-not-allowed transition-all">
-                    Start Voice Interview ({QUESTIONS_COUNT} Questions)
+                <button 
+                  disabled={!isReady} 
+                  onClick={startInterview} 
+                  className="w-full py-5 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white text-lg font-bold rounded-2xl shadow-xl shadow-cyan-900/40 disabled:opacity-40 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-3"
+                >
+                    <Mic size={24} /> Enter Assessment Chamber
                 </button>
+                <p className="text-[10px] text-slate-500 text-center uppercase tracking-widest font-bold">
+                  Zero-Tolerance Anti-Cheat Protocols Active
+                </p>
             </div>
         </div>
       </div>
@@ -414,13 +407,17 @@ export const InterviewRoom: React.FC<Props> = ({ onComplete }) => {
 
   if (status === 'intro') {
       return (
-          <div className="flex flex-col items-center justify-center h-[60vh] text-center space-y-6 animate-fade-in">
-              <div className="w-32 h-32 rounded-full bg-cyan-900/20 border-2 border-cyan-500 flex items-center justify-center relative">
-                  <Mic size={48} className="text-cyan-400" />
-                  <div className="absolute inset-0 border-4 border-cyan-500 rounded-full animate-ping opacity-20"></div>
+          <div className="flex flex-col items-center justify-center h-[60vh] text-center space-y-8 animate-fade-in">
+              <div className="relative">
+                  <div className="w-40 h-40 rounded-full bg-cyan-900/10 border-4 border-cyan-500 flex items-center justify-center shadow-[0_0_50px_rgba(6,182,212,0.3)]">
+                      <Mic size={64} className="text-cyan-400" />
+                  </div>
+                  <div className="absolute inset-0 border-8 border-cyan-500/20 rounded-full animate-ping"></div>
               </div>
-              <h2 className="text-3xl font-bold text-white">Initializing AI...</h2>
-              <p className="text-slate-400 max-w-md">Listen carefully. The AI will speak shortly.</p>
+              <div className="space-y-2">
+                  <h2 className="text-4xl font-bold text-white tracking-tight">Syncing Neural Interface...</h2>
+                  <p className="text-slate-400 text-lg">AI Voice Engine is calibrating for ${domain}.</p>
+              </div>
           </div>
       );
   }
@@ -428,44 +425,80 @@ export const InterviewRoom: React.FC<Props> = ({ onComplete }) => {
   if (status === 'active' || status === 'evaluating') {
     return (
       <div className="h-[calc(100vh-90px)] flex flex-col gap-4 animate-fade-in max-w-6xl mx-auto w-full px-4">
-         <div className="flex items-center justify-between bg-slate-800 p-4 rounded-xl border border-slate-700 shrink-0">
-             <div className="flex items-center gap-3">
-                 <span className="text-sm font-bold text-slate-400">Question {round} / {QUESTIONS_COUNT}</span>
-                 <span className="px-2 py-0.5 bg-slate-700 rounded text-xs text-slate-300 font-mono">{domain}</span>
+         <div className="flex items-center justify-between bg-slate-800 p-4 rounded-2xl border border-slate-700 shrink-0 shadow-lg">
+             <div className="flex items-center gap-4">
+                 <div className="flex flex-col">
+                    <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Question Progression</span>
+                    <span className="text-sm font-bold text-white">{round} / {QUESTIONS_COUNT}</span>
+                 </div>
+                 <div className="h-8 w-px bg-slate-700 mx-2"></div>
+                 <span className="px-3 py-1 bg-cyan-950 rounded-lg text-xs text-cyan-400 font-mono border border-cyan-900">{domain}</span>
              </div>
-             <div className="flex-1 mx-8 relative h-2 bg-slate-700 rounded-full overflow-hidden">
+             <div className="flex-1 mx-12 relative h-3 bg-slate-700 rounded-full overflow-hidden shadow-inner">
                 <div className={`absolute top-0 bottom-0 left-0 transition-all duration-1000 ${timeLeft < 10 ? 'bg-red-500' : 'bg-cyan-500'}`} style={{ width: `${(timeLeft / (maxTime || 60)) * 100}%` }}></div>
              </div>
-             <div className={`flex items-center gap-2 font-mono text-2xl font-bold ${timeLeft < 15 ? 'text-red-500 animate-pulse' : 'text-white'}`}>
-                 <Timer size={24} /> 0:{timeLeft < 10 ? '0' : ''}{timeLeft}
+             <div className={`flex items-center gap-3 font-mono text-3xl font-bold ${timeLeft < 15 ? 'text-red-500 animate-pulse' : 'text-white'}`}>
+                 <Timer size={28} className={timeLeft < 15 ? 'text-red-500' : 'text-cyan-500'} /> 
+                 {timeLeft < 10 ? '0:0' : '0:'}{timeLeft}
              </div>
          </div>
-         <div className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-4 min-h-0 pb-4">
-             <div className="bg-slate-800 rounded-2xl border border-slate-700 flex flex-col overflow-hidden relative h-full">
-                 <div className="flex-1 flex flex-col items-center justify-center p-6 text-center">
-                     <div className={`w-32 h-32 rounded-full mb-8 flex items-center justify-center shadow-2xl border-4 transition-all duration-500 ${aiState === 'speaking_question' || aiState === 'speaking_feedback' ? 'border-cyan-400 bg-cyan-900/20 scale-110 shadow-cyan-500/50' : aiState === 'processing' ? 'border-purple-500 bg-purple-900/20 animate-pulse' : 'border-slate-600 bg-slate-700'}`}>
-                         <Cpu size={64} className={`${aiState === 'processing' ? 'text-purple-400 animate-spin' : aiState === 'listening' ? 'text-slate-500' : 'text-cyan-400'}`} />
+
+         <div className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-6 min-h-0 pb-4">
+             {/* AI Side */}
+             <div className="bg-slate-800 rounded-3xl border border-slate-700 flex flex-col overflow-hidden relative h-full shadow-2xl">
+                 <div className="flex-1 flex flex-col items-center justify-center p-8 text-center bg-gradient-to-b from-slate-800 to-slate-900">
+                     <div className={`w-40 h-40 rounded-full mb-10 flex items-center justify-center shadow-2xl border-4 transition-all duration-700 ${aiState === 'speaking_question' || aiState === 'speaking_feedback' ? 'border-cyan-400 bg-cyan-900/30 scale-110 shadow-cyan-500/40' : aiState === 'processing' ? 'border-purple-500 bg-purple-900/30 animate-pulse' : aiState === 'listening' ? 'border-red-500 bg-red-900/10' : 'border-slate-700 bg-slate-800'}`}>
+                         <Cpu size={80} className={`${aiState === 'processing' ? 'text-purple-400 animate-spin' : aiState === 'listening' ? 'text-red-500 animate-bounce' : aiState === 'speaking_question' ? 'text-cyan-400' : 'text-slate-600'}`} />
                      </div>
-                     <h2 className="text-2xl font-bold text-white mb-2">
-                        {aiState === 'speaking_question' && "AI Speaking..."}
-                        {aiState === 'listening' && "Your Turn"}
-                        {aiState === 'processing' && "Thinking..."}
-                        {aiState === 'speaking_feedback' && "AI Feedback"}
-                     </h2>
+                     <div className="space-y-4">
+                        <h2 className="text-3xl font-bold text-white">
+                           {aiState === 'speaking_question' && "AI Voice Active"}
+                           {aiState === 'listening' && "Listening Mode"}
+                           {aiState === 'processing' && "Analyzing Response"}
+                           {aiState === 'speaking_feedback' && "Reviewing Logic"}
+                           {aiState === 'idle' && "Standby"}
+                        </h2>
+                        <div className="h-1 w-20 bg-cyan-500/20 mx-auto rounded-full"></div>
+                        <p className="text-slate-400 text-sm max-w-xs mx-auto italic">
+                           {aiState === 'listening' ? "Speak clearly and concisely. Time is remaining." : "Wait for the AI to finish its turn."}
+                        </p>
+                     </div>
                  </div>
              </div>
-             <div className="flex flex-col gap-4 h-full">
-                 <div className="flex-1 bg-black rounded-2xl overflow-hidden border border-slate-700 relative shadow-2xl group">
+
+             {/* User Side */}
+             <div className="flex flex-col gap-6 h-full">
+                 <div className="flex-1 bg-black rounded-3xl overflow-hidden border-2 border-slate-700 relative shadow-[0_0_40px_rgba(0,0,0,0.5)] group">
                      <video ref={videoRef} autoPlay muted playsInline className="w-full h-full object-cover transform scale-x-[-1]" />
+                     
+                     <div className="absolute top-4 left-4 flex gap-2">
+                        <div className="px-3 py-1 bg-black/60 backdrop-blur-md rounded-full border border-slate-700 text-[10px] text-white font-mono flex items-center gap-1.5">
+                           <div className="w-1.5 h-1.5 bg-red-500 rounded-full animate-pulse"></div>
+                           SECURE FEED
+                        </div>
+                     </div>
+
                      {currentRoundViolations.length > 0 && (
-                        <div className="absolute top-4 right-4 bg-red-600/90 text-white px-3 py-2 rounded shadow-lg border border-red-400 animate-pulse z-10 flex items-center gap-2">
-                            <ShieldAlert size={16} />
-                            <div className="text-xs font-bold">VIOLATION DETECTED</div>
+                        <div className="absolute inset-0 bg-red-900/20 backdrop-blur-sm flex flex-col items-center justify-center p-6 text-center z-20">
+                           <ShieldAlert size={64} className="text-red-500 mb-4 animate-bounce" />
+                           <div className="bg-red-600 text-white px-6 py-3 rounded-xl shadow-2xl font-bold border-2 border-red-400 mb-4">
+                              INTEGRITY VIOLATION DETECTED
+                           </div>
+                           <div className="space-y-1">
+                              {currentRoundViolations.map((v, i) => (
+                                 <p key={i} className="text-red-200 text-xs font-medium">{v}</p>
+                              ))}
+                           </div>
                         </div>
                      )}
                  </div>
-                 <button onClick={submitAnswer} disabled={aiState !== 'listening'} className={`w-full py-6 rounded-xl font-bold text-xl shadow-lg transition-all flex items-center justify-center gap-3 shrink-0 ${aiState === 'listening' ? 'bg-red-600 hover:bg-red-500 text-white shadow-red-900/30 cursor-pointer' : 'bg-slate-700 text-slate-500 cursor-not-allowed'}`}>
-                    {aiState === 'listening' ? "DONE SPEAKING" : 'WAITING FOR AI...'}
+
+                 <button 
+                    onClick={submitAnswer} 
+                    disabled={aiState !== 'listening'} 
+                    className={`w-full py-8 rounded-2xl font-black text-2xl shadow-2xl transition-all flex items-center justify-center gap-4 shrink-0 transform active:scale-95 ${aiState === 'listening' ? 'bg-red-600 hover:bg-red-500 text-white shadow-red-900/40' : 'bg-slate-800 text-slate-600 border border-slate-700 cursor-not-allowed opacity-50'}`}
+                 >
+                    {aiState === 'listening' ? <><Mic size={28} /> FINISH ANSWER</> : 'AWAITING SYSTEM...'}
                  </button>
              </div>
          </div>
@@ -478,18 +511,29 @@ export const InterviewRoom: React.FC<Props> = ({ onComplete }) => {
       return (
         <div className="max-w-3xl mx-auto py-12 animate-fade-in">
             <div className="text-center mb-12">
-                <div className="inline-flex items-center justify-center w-24 h-24 rounded-full bg-green-900/30 border border-green-500 mb-6 text-green-400 shadow-xl shadow-green-900/20">
-                    <BarChart2 size={48} />
+                <div className="inline-flex items-center justify-center w-32 h-32 rounded-full bg-green-950/20 border-4 border-green-500/50 mb-8 text-green-400 shadow-[0_0_40px_rgba(34,197,94,0.2)]">
+                    <BarChart2 size={64} />
                 </div>
-                <h1 className="text-4xl font-bold text-white mb-2">Interview Complete</h1>
-                <div className="flex items-center justify-center gap-2 mb-4">
-                   <span className="text-6xl font-bold text-white">{avgScore}</span>
-                   <span className="text-xl text-slate-500 self-end mb-2">/100</span>
+                <h1 className="text-5xl font-bold text-white mb-4 tracking-tight">Assessment Certified</h1>
+                <div className="flex items-center justify-center gap-3 mb-6">
+                   <span className="text-7xl font-black text-white">{avgScore}</span>
+                   <span className="text-2xl text-slate-500 font-bold self-end mb-4">/ 100</span>
                 </div>
-                <p className="text-slate-400">Your AI-Verified Voice Assessment Report</p>
+                <div className="px-4 py-2 bg-slate-800 rounded-full inline-block border border-slate-700 text-slate-400 text-sm font-medium">
+                  Verified Skill DNA: {domain}
+                </div>
             </div>
-            <button onClick={handleReturn} className="w-full py-4 bg-cyan-600 hover:bg-cyan-500 text-white font-bold rounded-xl shadow-lg transition-colors flex items-center justify-center gap-2">
-               Save Results to Profile <ChevronRight size={20} />
+            
+            <div className="bg-slate-800/50 border border-slate-700 rounded-2xl p-6 mb-8">
+               <h3 className="text-slate-400 text-xs font-bold uppercase tracking-widest mb-4">Security Log Summary</h3>
+               <div className="flex items-center gap-3 text-green-400 text-sm">
+                  <CheckCircle size={18} />
+                  <span>AI Proctor validation session complete. No disqualifying violations persisted.</span>
+               </div>
+            </div>
+
+            <button onClick={handleReturn} className="w-full py-5 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-bold rounded-2xl shadow-2xl shadow-cyan-900/30 transition-all flex items-center justify-center gap-3 text-xl">
+               Update My Profile <ChevronRight size={24} />
             </button>
         </div>
       );
