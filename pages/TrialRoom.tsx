@@ -19,7 +19,7 @@ const MAX_PASTES = 0;
 const MAX_FOCUS_LOST_TIME = 5000; 
 
 export const TrialRoom: React.FC<Props> = ({ domain, onComplete }) => {
-  const [session, setSession] = useState<TrialSession & { status: 'generating' | 'setup' | 'active' | 'analyzing' | 'completed' }>({
+  const [session, setSession] = useState<TrialSession>({
     id: crypto.randomUUID(),
     domain,
     status: 'generating',
