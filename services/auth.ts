@@ -152,8 +152,24 @@ const firebaseService: AuthService = {
         
         return guestUser;
     } catch (error: any) {
-        console.error("Guest Login Failed:", error);
-        throw new Error("Could not sign in as guest.");
+        console.warn("Firebase Anonymous Auth Failed (likely disabled in console). Falling back to Offline Guest.", error.code);
+        
+        // Fallback: Generate a local offline guest user
+        // This ensures the user can still enter the app even if Firebase Auth is strict
+        const guestId = 'offline_guest_' + Date.now().toString(36);
+        return {
+            id: guestId,
+            name: 'Guest (Offline)',
+            username: 'guest',
+            email: '',
+            isPremium: false,
+            avatar: '',
+            isOnboarded: true,
+            isAuthenticated: true,
+            history: [],
+            skills: ['Explorer'],
+            bio: 'Offline Mode'
+        };
     }
   },
 
@@ -163,6 +179,13 @@ const firebaseService: AuthService = {
 
   async updateUser(user: User): Promise<void> {
     if (!user.id) return;
+    
+    // Handle Offline Guest
+    if (user.id.startsWith('offline_guest_')) {
+        // No-op or save to localstorage could happen here if we wanted persistence
+        return;
+    }
+
     try {
       const userRef = doc(db, "users", user.id);
       // Use setDoc with merge: true to ensure we don't error if doc is missing

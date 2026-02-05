@@ -248,7 +248,21 @@ export const ChallengeArena: React.FC<Props> = ({ user }) => {
       setGeneratedTaskReady(true);
     } catch (e) {
       console.error("Generation failed", e);
-      addFeed("Error: Failed to generate task. Please recreate session.");
+      addFeed("Error: AI Generation failed. Using fallback scenario.");
+      
+      // Fallback Scenario to ensure session doesn't get stuck
+      const fallbackTask = `Implement a solution for the ${privateDomain} challenge. Ensure your code handles edge cases.`;
+      const fallbackCheckpoints = [
+         { id: 1, title: "Initialize Structure", description: "Setup the basic class or function", completed: false },
+         { id: 2, title: "Core Logic", description: "Implement the main algorithm", completed: false },
+         { id: 3, title: "Edge Cases", description: "Handle invalid inputs", completed: false }
+      ];
+      
+      // Upload fallback to backend
+      await challengeService.setSessionScenario(code, fallbackTask, fallbackCheckpoints);
+      setTask(fallbackTask);
+      setCheckpoints(fallbackCheckpoints);
+      setGeneratedTaskReady(true); // Important: Enable start button
     } finally {
       setIsGeneratingTask(false);
     }

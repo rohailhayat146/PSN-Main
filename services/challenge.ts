@@ -149,7 +149,7 @@ const firebaseImplementation = {
         if (doc.exists()) callback(doc.data() as ChallengeSession);
         else callback(null);
       }, (e) => {
-         console.warn("Snapshot error", e);
+         // console.warn("Snapshot error", e);
          callback(null);
       });
     } catch (e) { return () => {}; }
@@ -267,21 +267,70 @@ const mockImplementation = {
 // ------------------------------------------------------------------
 // DYNAMIC PROXY SERVICE
 // ------------------------------------------------------------------
-// This ensures that if `db` initializes late or fails, we check on every call.
 
-const getImpl = () => {
-    // If db object exists, use firebase. 
-    // Note: If permissions fail, firebase impl will handle it.
-    if (db) return firebaseImplementation;
-    return mockImplementation;
+const isOfflineUser = (user: User | string) => {
+    const id = typeof user === 'string' ? user : user.id;
+    return id.startsWith('offline_guest_');
 };
 
 export const challengeService = {
-    createSession: (h: User, d: SkillDomain) => getImpl().createSession(h, d),
-    joinSession: (c: string, u: User) => getImpl().joinSession(c, u),
-    leaveSession: (c: string, u: string) => getImpl().leaveSession(c, u),
-    setSessionScenario: (c: string, t: string, cp: ChallengeCheckpoint[]) => getImpl().setSessionScenario(c, t, cp),
-    startSession: (c: string) => getImpl().startSession(c),
-    updateProgress: (c: string, u: string, p: number, s: 'coding' | 'validating' | 'finished') => getImpl().updateProgress(c, u, p, s),
-    subscribeToSession: (c: string, cb: (d: ChallengeSession | null) => void) => getImpl().subscribeToSession(c, cb),
+    createSession: async (h: User, d: SkillDomain) => {
+        // If user is offline guest, go straight to mock
+        if (isOfflineUser(h)) return mockImplementation.createSession(h, d);
+        
+        // Try firebase
+        const res = await firebaseImplementation.createSession(h, d);
+        // If firebase returns offline/error (likely permissions issue), fall back to mock
+        if (res === "OFFLINE") return mockImplementation.createSession(h, d);
+        return res;
+    },
+    joinSession: async (c: string, u: User) => {
+        // Try Firebase first
+        let res = await firebaseImplementation.joinSession(c, u);
+        if (res.success) return res;
+        
+        // If failed, try Mock (local session)
+        return mockImplementation.joinSession(c, u);
+    },
+    leaveSession: async (c: string, u: string) => {
+        await firebaseImplementation.leaveSession(c, u);
+        await mockImplementation.leaveSession(c, u);
+    },
+    setSessionScenario: async (c: string, t: string, cp: ChallengeCheckpoint[]) => {
+        await firebaseImplementation.setSessionScenario(c, t, cp);
+        await mockImplementation.setSessionScenario(c, t, cp);
+    },
+    startSession: async (c: string) => {
+        await firebaseImplementation.startSession(c);
+        await mockImplementation.startSession(c);
+    },
+    updateProgress: async (c: string, u: string, p: number, s: 'coding' | 'validating' | 'finished') => {
+        await firebaseImplementation.updateProgress(c, u, p, s);
+        await mockImplementation.updateProgress(c, u, p, s);
+    },
+    subscribeToSession: (c: string, cb: (d: ChallengeSession | null) => void) => {
+        let hasMockData = false;
+        
+        const mockUnsub = mockImplementation.subscribeToSession(c, (data) => {
+            if (data) {
+                hasMockData = true;
+                cb(data);
+            }
+        });
+        
+        const fbUnsub = firebaseImplementation.subscribeToSession(c, (data) => {
+            // Live data takes precedence if available
+            if (data) {
+                cb(data);
+            } else if (!hasMockData) {
+                // Only send null if we don't have local data
+                cb(null);
+            }
+        });
+        
+        return () => {
+            mockUnsub();
+            fbUnsub();
+        };
+    },
 };
