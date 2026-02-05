@@ -36,21 +36,15 @@ export const Login: React.FC<Props> = ({ onLogin }) => {
     setShowConfirmPassword(false);
   };
 
-  const handleGuestLogin = () => {
-    const guestUser: User = {
-      id: 'guest-' + Date.now(),
-      name: 'Guest Explorer',
-      username: 'guest_user',
-      email: 'guest@demo.com',
-      isPremium: false,
-      avatar: '',
-      isOnboarded: true, // Skip profile setup
-      isAuthenticated: true,
-      history: [],
-      skills: ['Explorer'],
-      bio: 'Just exploring the platform.'
-    };
-    onLogin(guestUser);
+  const handleGuestLogin = async () => {
+    setIsLoading(true);
+    try {
+        const user = await authService.loginAsGuest();
+        onLogin(user);
+    } catch (e: any) {
+        setError("Failed to initialize guest session. Please try regular signup.");
+        setIsLoading(false);
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -257,6 +251,7 @@ export const Login: React.FC<Props> = ({ onLogin }) => {
 
             <button 
               onClick={handleGuestLogin}
+              disabled={isLoading}
               className="mt-4 w-full flex items-center justify-center gap-2 py-2.5 rounded-xl border border-slate-600 hover:border-slate-500 text-slate-300 hover:text-white hover:bg-slate-700/50 transition-all text-sm font-medium"
             >
               <Compass size={18} />
@@ -266,7 +261,7 @@ export const Login: React.FC<Props> = ({ onLogin }) => {
         </div>
         
         <p className="mt-8 text-center text-xs text-slate-600">
-          Securely powered by LocalStorage Database Simulation.<br/>
+          Securely powered by LocalStorage (Mock) or Firebase (Live).<br/>
           Your password is hashed before storage.
         </p>
       </div>

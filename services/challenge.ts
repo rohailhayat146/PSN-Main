@@ -19,28 +19,15 @@ const generateSessionCode = () => {
 };
 
 // ------------------------------------------------------------------
-// INTERFACE
-// ------------------------------------------------------------------
-
-interface ChallengeService {
-  createSession(host: User, domain: SkillDomain): Promise<string>;
-  joinSession(code: string, user: User): Promise<{ success: boolean; message?: string }>;
-  leaveSession(code: string, userId: string): Promise<void>;
-  setSessionScenario(code: string, taskDescription: string, checkpoints: ChallengeCheckpoint[]): Promise<void>;
-  startSession(code: string): Promise<void>;
-  updateProgress(code: string, userId: string, progress: number, status: 'coding' | 'validating' | 'finished'): Promise<void>;
-  subscribeToSession(code: string, callback: (data: ChallengeSession | null) => void): () => void;
-}
-
-// ------------------------------------------------------------------
 // FIREBASE IMPLEMENTATION
 // ------------------------------------------------------------------
 
-const firebaseImplementation: ChallengeService = {
+const firebaseImplementation = {
   
   async createSession(host: User, domain: SkillDomain): Promise<string> {
     const code = generateSessionCode();
     try {
+      if (!db) throw new Error("Database not initialized");
       const sessionRef = doc(db, 'challenges', code);
       const initialParticipant: ChallengeParticipant = {
         id: host.id,
@@ -60,14 +47,16 @@ const firebaseImplementation: ChallengeService = {
       };
       await setDoc(sessionRef, sessionData);
       return code;
-    } catch (e) {
-      console.warn("Firebase create failed, falling back...");
+    } catch (e: any) {
+      console.error("Firebase createSession failed:", e);
+      // Fallback: If permission denied or other error, return OFFLINE to notify UI
       return "OFFLINE"; 
     }
   },
 
   async joinSession(code: string, user: User): Promise<{ success: boolean; message?: string }> {
     try {
+      if (!db) throw new Error("Database not initialized");
       const sessionRef = doc(db, 'challenges', code);
       await runTransaction(db, async (transaction) => {
         const sessionDoc = await transaction.get(sessionRef);
@@ -94,12 +83,14 @@ const firebaseImplementation: ChallengeService = {
       });
       return { success: true };
     } catch (e: any) {
+      console.error("Firebase joinSession failed:", e);
       return { success: false, message: typeof e === 'string' ? e : "Connection failed" };
     }
   },
 
   async leaveSession(code: string, userId: string): Promise<void> {
     try {
+      if (!db) return;
       const sessionRef = doc(db, 'challenges', code);
       await runTransaction(db, async (transaction) => {
         const sessionDoc = await transaction.get(sessionRef);
@@ -113,6 +104,7 @@ const firebaseImplementation: ChallengeService = {
 
   async setSessionScenario(code: string, taskDescription: string, checkpoints: ChallengeCheckpoint[]): Promise<void> {
     try {
+      if (!db) return;
       const sessionRef = doc(db, 'challenges', code);
       await updateDoc(sessionRef, {
         taskDescription,
@@ -123,6 +115,7 @@ const firebaseImplementation: ChallengeService = {
 
   async startSession(code: string): Promise<void> {
     try {
+      if (!db) return;
       const sessionRef = doc(db, 'challenges', code);
       await updateDoc(sessionRef, {
         status: 'active',
@@ -133,6 +126,7 @@ const firebaseImplementation: ChallengeService = {
 
   async updateProgress(code: string, userId: string, progress: number, status: 'coding' | 'validating' | 'finished'): Promise<void> {
     try {
+      if (!db) return;
       const sessionRef = doc(db, 'challenges', code);
       await runTransaction(db, async (transaction) => {
          const sessionDoc = await transaction.get(sessionRef);
@@ -149,11 +143,15 @@ const firebaseImplementation: ChallengeService = {
 
   subscribeToSession(code: string, callback: (data: ChallengeSession | null) => void): () => void {
     try {
+      if (!db) return () => {};
       const sessionRef = doc(db, 'challenges', code);
       return onSnapshot(sessionRef, (doc) => {
         if (doc.exists()) callback(doc.data() as ChallengeSession);
         else callback(null);
-      }, () => callback(null));
+      }, (e) => {
+         console.warn("Snapshot error", e);
+         callback(null);
+      });
     } catch (e) { return () => {}; }
   }
 };
@@ -167,7 +165,7 @@ const MOCK_STORAGE_KEY = 'psn_mock_challenges';
 const getMockDB = () => JSON.parse(localStorage.getItem(MOCK_STORAGE_KEY) || '{}');
 const saveMockDB = (data: any) => localStorage.setItem(MOCK_STORAGE_KEY, JSON.stringify(data));
 
-const mockImplementation: ChallengeService = {
+const mockImplementation = {
   async createSession(host: User, domain: SkillDomain): Promise<string> {
     const code = generateSessionCode();
     const db = getMockDB();
@@ -266,5 +264,24 @@ const mockImplementation: ChallengeService = {
   }
 };
 
-// Export correct service based on environment capability
-export const challengeService = db ? firebaseImplementation : mockImplementation;
+// ------------------------------------------------------------------
+// DYNAMIC PROXY SERVICE
+// ------------------------------------------------------------------
+// This ensures that if `db` initializes late or fails, we check on every call.
+
+const getImpl = () => {
+    // If db object exists, use firebase. 
+    // Note: If permissions fail, firebase impl will handle it.
+    if (db) return firebaseImplementation;
+    return mockImplementation;
+};
+
+export const challengeService = {
+    createSession: (h: User, d: SkillDomain) => getImpl().createSession(h, d),
+    joinSession: (c: string, u: User) => getImpl().joinSession(c, u),
+    leaveSession: (c: string, u: string) => getImpl().leaveSession(c, u),
+    setSessionScenario: (c: string, t: string, cp: ChallengeCheckpoint[]) => getImpl().setSessionScenario(c, t, cp),
+    startSession: (c: string) => getImpl().startSession(c),
+    updateProgress: (c: string, u: string, p: number, s: 'coding' | 'validating' | 'finished') => getImpl().updateProgress(c, u, p, s),
+    subscribeToSession: (c: string, cb: (d: ChallengeSession | null) => void) => getImpl().subscribeToSession(c, cb),
+};

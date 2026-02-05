@@ -1,7 +1,7 @@
 
 import { User } from '../types';
 import { initializeApp } from 'firebase/app';
-import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut } from 'firebase/auth';
+import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, signInAnonymously } from 'firebase/auth';
 import { getFirestore, doc, setDoc, getDoc } from 'firebase/firestore';
 
 // ------------------------------------------------------------------
@@ -53,6 +53,7 @@ if (isConfigValid) {
 export interface AuthService {
   login(email: string, password: string): Promise<User>;
   register(email: string, password: string): Promise<User>;
+  loginAsGuest(): Promise<User>;
   logout(): Promise<void>;
   updateUser(user: User): Promise<void>;
   onAuthStateChange(callback: (user: User | null) => void): () => void;
@@ -123,6 +124,39 @@ const firebaseService: AuthService = {
     return { ...newUser, isAuthenticated: true };
   },
 
+  async loginAsGuest(): Promise<User> {
+    try {
+        const userCredential = await signInAnonymously(auth);
+        const firebaseUser = userCredential.user;
+        
+        const guestUser: User = {
+            id: firebaseUser.uid,
+            name: 'Guest Explorer',
+            username: `guest_${firebaseUser.uid.substring(0,6)}`,
+            email: '',
+            isPremium: false,
+            avatar: '',
+            isOnboarded: true,
+            isAuthenticated: true,
+            history: [],
+            skills: ['Explorer'],
+            bio: 'Just exploring the platform.'
+        };
+        
+        // Try to save guest profile so other parts of the app can read it (optional)
+        try {
+            await setDoc(doc(db, "users", firebaseUser.uid), guestUser);
+        } catch (e) {
+            console.warn("Could not save guest profile to DB (likely permissions), continuing with Auth only.");
+        }
+        
+        return guestUser;
+    } catch (error: any) {
+        console.error("Guest Login Failed:", error);
+        throw new Error("Could not sign in as guest.");
+    }
+  },
+
   async logout(): Promise<void> {
     await signOut(auth);
   },
@@ -150,19 +184,29 @@ const firebaseService: AuthService = {
           if (docSnap.exists()) {
             callback({ ...docSnap.data(), isAuthenticated: true } as User);
           } else {
-             throw new Error("Profile not found in DB");
+             // Fallback for anonymous users or missing profiles
+             callback({
+                id: firebaseUser.uid,
+                email: firebaseUser.email || '',
+                name: firebaseUser.displayName || 'Guest',
+                username: (firebaseUser.email || '').split('@')[0] || 'guest',
+                isPremium: false,
+                avatar: firebaseUser.photoURL || '',
+                isOnboarded: !firebaseUser.isAnonymous ? false : true, // Guests skip onboarding
+                isAuthenticated: true,
+                history: []
+              } as User);
           }
         } catch (error) {
           console.warn("Firestore Read Error (AuthChange): Using fallback auth user.", error);
-          // Fallback for users created in Auth but missing in Firestore OR permission denied
           callback({
             id: firebaseUser.uid,
             email: firebaseUser.email || '',
-            name: firebaseUser.displayName || '',
-            username: (firebaseUser.email || '').split('@')[0],
+            name: firebaseUser.displayName || 'Guest',
+            username: (firebaseUser.email || '').split('@')[0] || 'guest',
             isPremium: false,
             avatar: firebaseUser.photoURL || '',
-            isOnboarded: false,
+            isOnboarded: true,
             isAuthenticated: true,
             history: []
           } as User);
@@ -237,12 +281,40 @@ const mockService: AuthService = {
     return { ...safeUser, isAuthenticated: true };
   },
 
+  async loginAsGuest(): Promise<User> {
+      await new Promise(resolve => setTimeout(resolve, DELAY_MS));
+      const guestId = 'guest_' + Date.now();
+      const guestUser: User = {
+          id: guestId,
+          name: 'Guest Explorer',
+          username: 'guest',
+          email: '',
+          isPremium: false,
+          avatar: '',
+          isOnboarded: true,
+          isAuthenticated: true,
+          history: [],
+          skills: ['Explorer'],
+          bio: 'Just exploring.'
+      };
+      localStorage.setItem(SESSION_KEY, 'GUEST_MODE');
+      localStorage.setItem('psn_guest_data', JSON.stringify(guestUser));
+      return guestUser;
+  },
+
   async logout(): Promise<void> {
     localStorage.removeItem(SESSION_KEY);
+    localStorage.removeItem('psn_guest_data');
     await new Promise(resolve => setTimeout(resolve, 200));
   },
 
   async updateUser(user: User): Promise<void> {
+    // If it's a guest, update guest data
+    if (user.id.startsWith('guest')) {
+         localStorage.setItem('psn_guest_data', JSON.stringify(user));
+         return;
+    }
+    
     if (!user.email) return;
     await new Promise(resolve => setTimeout(resolve, 500));
 
@@ -257,11 +329,19 @@ const mockService: AuthService = {
   },
 
   onAuthStateChange(callback: (user: User | null) => void): () => void {
-    // Simple mock session restoration
-    const email = localStorage.getItem(SESSION_KEY);
-    if (email) {
+    // Check for guest session first
+    const session = localStorage.getItem(SESSION_KEY);
+    if (session === 'GUEST_MODE') {
+        const guestData = localStorage.getItem('psn_guest_data');
+        if (guestData) {
+            callback(JSON.parse(guestData));
+            return () => {};
+        }
+    }
+
+    if (session) {
       const dbLocal = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
-      const user = dbLocal[email];
+      const user = dbLocal[session];
       if (user) {
         const { passwordHash, ...safeUser } = user;
         callback({ ...safeUser, isAuthenticated: true });
