@@ -58,8 +58,18 @@ export const ChallengeArena: React.FC<Props> = ({ user }) => {
         if (data) {
           setSessionData(data);
           
-          // Sync participants
-          setParticipants(data.participants);
+          // Sync participants with Name Protection
+          // If server sends a participant with missing info, fallback to what we know locally
+          setParticipants(prev => {
+             return data.participants.map(serverP => {
+                const localP = prev.find(p => p.id === serverP.id);
+                return {
+                   ...serverP,
+                   name: serverP.name || localP?.name || 'Unknown User',
+                   avatar: serverP.avatar || localP?.avatar || '?',
+                };
+             });
+          });
 
           // If session starts
           if (mode === 'waiting' && data.status === 'active') {
@@ -67,13 +77,13 @@ export const ChallengeArena: React.FC<Props> = ({ user }) => {
             setCheckpoints(data.checkpoints || []);
             setMode('race');
             setIsPrivate(true);
-            setGeneratedTaskReady(true); // Ensure client knows it's ready
+            setGeneratedTaskReady(true);
             addFeed("Private Session Started!");
           }
         } else {
           // If data is null, session might have been deleted or invalid
           if (mode === 'waiting' || mode === 'race') {
-             handleLeaveLobby(); // Reset local state
+             handleLeaveLobby(); 
           }
         }
       });
@@ -92,7 +102,7 @@ export const ChallengeArena: React.FC<Props> = ({ user }) => {
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, [sessionCode, mode, user.id]);
 
-  // Clean up on component unmount (Navigation away)
+  // Clean up on component unmount
   useEffect(() => {
     return () => {
        if (sessionCode && user.id && (mode === 'waiting' || mode === 'race')) {
@@ -100,17 +110,6 @@ export const ChallengeArena: React.FC<Props> = ({ user }) => {
        }
     };
   }, [sessionCode, mode, user.id]);
-
-  // Sync my progress to DB during private race
-  useEffect(() => {
-    if (isPrivate && sessionCode && mode === 'race') {
-      const myData = participants.find(p => p.id === user.id);
-      if (myData) {
-        challengeService.updateProgress(sessionCode, user.id, myData.progress, myData.status);
-      }
-    }
-  }, [participants, isPrivate, sessionCode, user.id, mode]);
-
 
   // --- ANTI-CHEAT MONITORING ---
   useEffect(() => {
@@ -136,7 +135,6 @@ export const ChallengeArena: React.FC<Props> = ({ user }) => {
        handleViolation("Paste Attempt Blocked");
     };
 
-    // Attach listeners
     document.addEventListener("visibilitychange", handleVisibility);
     window.addEventListener("blur", handleBlur);
     document.addEventListener("copy", preventCopy);
@@ -157,7 +155,6 @@ export const ChallengeArena: React.FC<Props> = ({ user }) => {
     setLastViolationMsg(msg);
     addFeed(`⚠️ WARNING: ${msg}`);
     
-    // Clear warning message after 3s
     setTimeout(() => {
        setLastViolationMsg("");
     }, 3000);
@@ -221,7 +218,6 @@ export const ChallengeArena: React.FC<Props> = ({ user }) => {
   };
 
   const handleCreatePrivateSession = async () => {
-    // 1. Create Session immediately (Optimistic UI)
     const code = await challengeService.createSession(user, privateDomain);
     
     if (code === "OFFLINE") {
@@ -229,7 +225,6 @@ export const ChallengeArena: React.FC<Props> = ({ user }) => {
       return;
     }
 
-    // 2. Enter Waiting Room immediately
     setSessionCode(code);
     setIsHost(true);
     setIsPrivate(true);
@@ -237,12 +232,10 @@ export const ChallengeArena: React.FC<Props> = ({ user }) => {
     setIsGeneratingTask(true);
     setGeneratedTaskReady(false);
 
-    // 3. Background: Generate & Update Task
     try {
       const scenario = await generateChallengeScenario(privateDomain);
       await challengeService.setSessionScenario(code, scenario.taskDescription, scenario.checkpoints);
       
-      // Update local state for the host
       setTask(scenario.taskDescription);
       setCheckpoints(scenario.checkpoints);
       setGeneratedTaskReady(true);
@@ -250,7 +243,6 @@ export const ChallengeArena: React.FC<Props> = ({ user }) => {
       console.error("Generation failed", e);
       addFeed("Error: AI Generation failed. Using fallback scenario.");
       
-      // Fallback Scenario to ensure session doesn't get stuck
       const fallbackTask = `Implement a solution for the ${privateDomain} challenge. Ensure your code handles edge cases.`;
       const fallbackCheckpoints = [
          { id: 1, title: "Initialize Structure", description: "Setup the basic class or function", completed: false },
@@ -258,11 +250,10 @@ export const ChallengeArena: React.FC<Props> = ({ user }) => {
          { id: 3, title: "Edge Cases", description: "Handle invalid inputs", completed: false }
       ];
       
-      // Upload fallback to backend
       await challengeService.setSessionScenario(code, fallbackTask, fallbackCheckpoints);
       setTask(fallbackTask);
       setCheckpoints(fallbackCheckpoints);
-      setGeneratedTaskReady(true); // Important: Enable start button
+      setGeneratedTaskReady(true);
     } finally {
       setIsGeneratingTask(false);
     }
@@ -287,8 +278,6 @@ export const ChallengeArena: React.FC<Props> = ({ user }) => {
       alert("Please wait for the challenge generation to complete.");
       return;
     }
-    
-    // Just trigger status update - Everyone transitions instantly
     await challengeService.startSession(sessionCode);
   };
 
@@ -311,7 +300,7 @@ export const ChallengeArena: React.FC<Props> = ({ user }) => {
     setTask(scenario.taskDescription);
     setCheckpoints(scenario.checkpoints);
     setIsPrivate(false);
-    setViolationCount(0); // Reset violations
+    setViolationCount(0);
     
     const bots = BOTS.slice(0, 3).map((b, i) => ({
       id: `bot-${i}`,
@@ -345,29 +334,38 @@ export const ChallengeArena: React.FC<Props> = ({ user }) => {
     const cp = checkpoints.find(c => c.id === checkpointId);
     if (!cp) return;
 
-    // Use privateDomain if private, else publicDomain
     const domainToUse = isPrivate ? privateDomain : publicDomain;
     const result = await validateChallengeStep(domainToUse, cp.title, code);
     
     setValidating(false);
     
     if (result.success && result.score > 60) {
-       setCheckpoints(prev => prev.map(c => c.id === checkpointId ? { ...c, completed: true } : c));
+       // 1. Calculate New Checkpoints Local State
+       const nextCheckpoints = checkpoints.map(c => 
+          c.id === checkpointId ? { ...c, completed: true } : c
+       );
+       setCheckpoints(nextCheckpoints);
        
+       // 2. Calculate New Progress Percentage
+       const stepsCompleted = nextCheckpoints.filter(c => c.completed).length;
+       const total = nextCheckpoints.length;
+       const newProgress = Math.floor((stepsCompleted / total) * 100);
+       
+       // 3. Update Participant Local State (Optimistic Update)
        setParticipants(prev => prev.map(p => {
          if (p.isBot || p.id !== user.id) return p;
-         const stepsCompleted = checkpoints.filter(c => c.id !== checkpointId && c.completed).length + 1;
-         const total = checkpoints.length;
-         const newProg = Math.floor((stepsCompleted / total) * 100);
-         
-         if (newProg === 100) {
-           setMode('results');
-           if (isPrivate && sessionCode) {
-             challengeService.updateProgress(sessionCode, user.id, 100, 'finished');
-           }
-         }
-         return { ...p, progress: newProg };
+         return { ...p, progress: newProgress };
        }));
+
+       // 4. Send Update to Backend IMMEDIATELY (Live Sync)
+       if (isPrivate && sessionCode) {
+         challengeService.updateProgress(sessionCode, user.id, newProgress, newProgress === 100 ? 'finished' : 'coding');
+       }
+
+       // 5. Handle Win Condition
+       if (newProgress === 100) {
+           setTimeout(() => setMode('results'), 1000);
+       }
        
        addFeed(`AI Judge: Your solution for "${cp.title}" passed! (+${Math.floor(100/checkpoints.length)}%)`);
     } else {
@@ -413,7 +411,6 @@ export const ChallengeArena: React.FC<Props> = ({ user }) => {
             <div className="space-y-4">
               <label className="text-sm text-slate-400 block mb-2">Select Domain</label>
               
-              {/* Domain Selector with All Skills */}
               <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-6 max-h-[240px] overflow-y-auto pr-2 custom-scrollbar border border-slate-700/50 rounded-lg p-2 bg-slate-900/30">
                 {Object.values(SkillDomain).map(d => (
                   <button
@@ -513,7 +510,6 @@ export const ChallengeArena: React.FC<Props> = ({ user }) => {
   if (mode === 'waiting') {
     return (
       <div className="max-w-4xl mx-auto py-12 animate-fade-in text-center relative overflow-hidden rounded-3xl mt-8">
-        {/* Solid Background Effect */}
         <div className="absolute inset-0 bg-slate-900">
            <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-purple-900/40 via-slate-900 to-slate-950"></div>
            <div className="absolute inset-0 opacity-20" style={{ backgroundImage: 'radial-gradient(circle at 1px 1px, rgba(255,255,255,0.15) 1px, transparent 0)', backgroundSize: '40px 40px' }}></div>
@@ -666,7 +662,6 @@ export const ChallengeArena: React.FC<Props> = ({ user }) => {
                <h3 className="font-bold text-white">Mission Objectives</h3>
             </div>
             
-            {/* Added select-none and event blockers */}
             <div className="p-4 flex-1 overflow-y-auto select-none" onContextMenu={(e) => e.preventDefault()}>
                <p className="text-sm text-slate-300 mb-6 font-medium leading-relaxed">{task}</p>
                
@@ -720,7 +715,6 @@ export const ChallengeArena: React.FC<Props> = ({ user }) => {
                spellCheck={false}
             />
 
-            {/* Violation Alert Overlay */}
             {lastViolationMsg && (
               <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-red-600/90 text-white px-6 py-4 rounded-xl shadow-2xl z-20 animate-bounce font-bold border-2 border-red-400 flex flex-col items-center gap-2">
                  <AlertTriangle size={32} />
@@ -728,7 +722,6 @@ export const ChallengeArena: React.FC<Props> = ({ user }) => {
               </div>
             )}
 
-            {/* Live Feed Overlay */}
             <div className="absolute bottom-4 left-4 right-4 pointer-events-none">
                <div className="flex flex-col gap-2 items-start">
                   {feed.map((msg, i) => (
