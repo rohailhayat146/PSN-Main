@@ -1,4 +1,3 @@
-
 import Stripe from 'stripe';
 
 export default async function handler(req, res) {
@@ -9,35 +8,45 @@ export default async function handler(req, res) {
   }
 
   // 2. Environment Variable Check
-  if (!process.env.STRIPE_SECRET_KEY) {
-    console.error("CRITICAL: STRIPE_SECRET_KEY is missing.");
+  const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
+  if (!stripeSecretKey) {
+    console.error("CRITICAL: STRIPE_SECRET_KEY is missing in environment variables.");
     return res.status(500).json({ 
-      error: "Server Misconfiguration: Stripe API Key is missing." 
+      error: "Server configuration error: Payment provider key is not configured." 
     });
   }
 
   // 3. Initialize Stripe
-  const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
-
-  const { userId, email, returnUrl, type, plan } = req.body;
-  
-  // Dynamic Configuration based on Type and Plan (Synced with server.js)
-  let productName = 'Professional Certification Exam';
-  let amount = 5000; // Default $50.00
-  let description = 'One-time access to the Exam Hall';
-  
-  if (type === 'subscription') {
-    productName = 'PSN Verified Membership';
-    if (plan === 'yearly') {
-        amount = 30000; // $300.00
-        description = 'Yearly Verified Membership (Save 15%)';
-    } else {
-        amount = 2900; // $29.00
-        description = 'Monthly Verified Membership';
-    }
-  }
+  const stripe = new Stripe(stripeSecretKey);
 
   try {
+    const { userId, email, returnUrl, type, plan } = req.body;
+
+    if (!userId) {
+      return res.status(400).json({ error: "Missing required parameter: userId" });
+    }
+    
+    // Dynamic Configuration based on Type and Plan
+    // Prices are enforced server-side for security
+    let productName = 'Professional Certification Exam';
+    let amount = 5000; // $50.00
+    let description = 'High-Stakes Skill Verification Exam Access';
+    let mode = 'payment'; // Default for one-time
+    
+    if (type === 'subscription') {
+      productName = 'PSN Verified Membership';
+      if (plan === 'yearly') {
+          amount = 30000; // $300.00
+          description = 'Yearly PSN Verified Pro Membership';
+      } else {
+          amount = 2900; // $29.00
+          description = 'Monthly PSN Verified Pro Membership';
+      }
+      // Note: For real subscriptions you'd use mode: 'subscription', 
+      // but here we are using 'payment' for a fixed-term access credits approach as per existing UI.
+    }
+
+    // Create Stripe Checkout Session
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ['card'],
       line_items: [
@@ -54,20 +63,21 @@ export default async function handler(req, res) {
           quantity: 1,
         },
       ],
-      mode: 'payment',
-      success_url: `${returnUrl}?payment_success=true&session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${returnUrl}?payment_canceled=true`,
+      mode: mode,
+      success_url: `${returnUrl}${returnUrl.includes('?') ? '&' : '?'}payment_success=true&session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${returnUrl}${returnUrl.includes('?') ? '&' : '?'}payment_canceled=true`,
       metadata: {
-        userId,
-        product: type || "Exam Certification",
-        plan: plan || 'one_time'
+        userId: userId,
+        productType: type || "exam",
+        plan: plan || 'one_time_entry'
       },
-      customer_email: email,
+      customer_email: email || undefined,
     });
 
-    res.status(200).json({ url: session.url });
+    // Return the session URL for client-side redirection
+    return res.status(200).json({ url: session.url });
   } catch (e) {
-    console.error("Stripe API Error:", e.message);
-    res.status(500).json({ error: `Stripe Error: ${e.message}` });
+    console.error("Stripe Checkout Error:", e.message);
+    return res.status(500).json({ error: `Checkout process failed: ${e.message}` });
   }
 }

@@ -1,12 +1,13 @@
-
 // PSN Payment Service
 // Bridges the frontend with the Stripe Backend
 
 // Determines the backend URL based on environment
 const getApiUrl = () => {
-  if (window.location.hostname === 'localhost') {
+  // If we are in local development and not using Vercel Dev, we might point to a specific port
+  if (window.location.hostname === 'localhost' && !window.location.port.includes('3000')) {
     return 'http://localhost:4242/api';
   }
+  // Standard Vercel deployment / Vercel Dev uses relative /api path
   return '/api'; 
 };
 
@@ -15,6 +16,9 @@ export const paymentService = {
    * Initiates the Stripe Checkout redirection for Certification Exam.
    */
   async processExamPayment(userId: string, email?: string): Promise<void> {
+    if (!userId || userId === 'guest') {
+      throw new Error("You must be logged in to access the Exam Hall.");
+    }
     console.log(`[PaymentService] Redirecting to Stripe (Exam) for User: ${userId}`);
     await this._createCheckoutSession(userId, email, 'exam');
   },
@@ -23,6 +27,9 @@ export const paymentService = {
    * Initiates the Stripe Checkout for Monthly/Yearly Subscription.
    */
   async processSubscription(userId: string, plan: 'monthly' | 'yearly', email?: string): Promise<void> {
+    if (!userId || userId === 'guest') {
+      throw new Error("You must be logged in to subscribe.");
+    }
     console.log(`[PaymentService] Redirecting to Stripe (Sub: ${plan}) for User: ${userId}`);
     await this._createCheckoutSession(userId, email, 'subscription', plan);
   },
@@ -31,11 +38,11 @@ export const paymentService = {
    * Internal helper to call backend
    */
   async _createCheckoutSession(userId: string, email: string | undefined, type: 'exam' | 'subscription', plan?: 'monthly' | 'yearly'): Promise<void> {
-    // Construct the absolute return URL
-    const path = window.location.pathname === '/' ? '' : window.location.pathname;
-    // Different return paths based on purchase type
-    const returnPath = type === 'exam' ? '#/exam' : '#/'; 
-    const returnUrl = `${window.location.origin}${path}${returnPath}`;
+    // Construct a clean absolute return URL for Stripe to redirect back to
+    // Ensure there is a trailing slash before the hash for standard routing
+    const origin = window.location.origin;
+    const returnPath = type === 'exam' ? '/#/exam' : '/#/'; 
+    const returnUrl = `${origin}${returnPath}`;
 
     try {
       const apiUrl = `${getApiUrl()}/create-checkout-session`;
@@ -48,31 +55,33 @@ export const paymentService = {
           email, 
           returnUrl,
           type,
-          plan // Only used if type === 'subscription'
+          plan 
         })
       });
 
-      // Handle non-JSON responses
+      // Check if response is JSON
       const contentType = response.headers.get("content-type");
       if (!contentType || contentType.indexOf("application/json") === -1) {
-        throw new Error("Payment Server Error: Invalid response type.");
+        const text = await response.text();
+        console.error("[PaymentService] Non-JSON response:", text);
+        throw new Error("Payment Server Error: The server returned an invalid response.");
       }
+
+      const data = await response.json();
 
       if (!response.ok) {
-        const err = await response.json();
-        throw new Error(err.error || "Failed to create checkout session");
+        throw new Error(data.error || "Failed to create checkout session");
       }
       
-      const { url } = await response.json();
-
-      if (url) {
-        window.location.href = url;
+      if (data.url) {
+        // Critical: Redirect the user to the Stripe hosted checkout page
+        window.location.href = data.url;
       } else {
-        throw new Error("No payment URL returned from backend");
+        throw new Error("No payment URL returned from checkout session creation.");
       }
 
     } catch (e: any) {
-      console.error("[PaymentService] Error:", e);
+      console.error("[PaymentService] Critical Error:", e);
       throw e;
     }
   }
