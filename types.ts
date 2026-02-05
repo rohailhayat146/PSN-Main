@@ -105,7 +105,7 @@ export interface SkillDNAScore {
 export interface TrialSession {
   id: string;
   domain: SkillDomain;
-  status: 'idle' | 'generating' | 'active' | 'analyzing' | 'completed';
+  status: 'idle' | 'generating' | 'setup' | 'active' | 'analyzing' | 'completed';
   startTime?: number;
   endTime?: number;
   taskDescription?: string;
