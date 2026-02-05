@@ -1,4 +1,3 @@
-
 import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
 
@@ -25,12 +24,10 @@ export default defineConfig(({ mode }) => {
     },
     // Define global constants replacement
     define: {
-      // Safely replace process.env.API_KEY with the actual value from environment
+      // Safely replace specific env vars
       'process.env.API_KEY': JSON.stringify(env.API_KEY),
-      // Ensure NODE_ENV is passed correctly for React optimization
       'process.env.NODE_ENV': JSON.stringify(mode),
-      // Polyfill remaining process.env to empty object to prevent crashes in some libs
-      'process.env': {}
+      // DO NOT replace the entire process.env object as it breaks polyfills
     },
     server: {
       port: 3000,

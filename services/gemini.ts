@@ -1,7 +1,18 @@
 import { GoogleGenAI, Type, GenerateContentResponse } from "@google/genai";
 import { SkillDomain, SkillDNAScore, AntiCheatLog, ExamMCQ, ExamTheory, ExamPractical, ChallengeCheckpoint } from '../types';
 
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+// Lazy initialize client to prevent runtime crash on module load if env vars are missing
+let aiClient: GoogleGenAI | null = null;
+
+const getAiClient = () => {
+  if (!aiClient) {
+    // Fallback key prevents constructor error, actual calls will fail gracefully with auth error later
+    const key = process.env.API_KEY || 'PLACEHOLDER_KEY'; 
+    aiClient = new GoogleGenAI({ apiKey: key });
+  }
+  return aiClient;
+};
+
 const GENERATION_MODEL = 'gemini-3-flash-preview';
 const REASONING_MODEL = 'gemini-3-pro-preview';
 
@@ -19,6 +30,7 @@ export const analyzeEnvironmentSnapshot = async (
   imageBase64: string
 ): Promise<{ lighting: boolean; singlePerson: boolean; noDevices: boolean; feedback: string }> => {
   try {
+    const ai = getAiClient();
     const prompt = `
       Role: Strict Exam Proctor AI. 
       Task: Analyze this webcam snapshot for interview integrity violations.
@@ -74,6 +86,7 @@ export const analyzeEnvironmentSnapshot = async (
 };
 
 export const generateSkillTrial = async (domain: SkillDomain): Promise<{ questions: {id: number, text: string}[], constraints: string[] }> => {
+    const ai = getAiClient();
     const prompt = `Generate 10 technical interview questions for ${domain}. Return strictly JSON.`;
     const response = await withRetry<GenerateContentResponse>(() => ai.models.generateContent({
         model: REASONING_MODEL,
@@ -114,6 +127,7 @@ export const evaluatePerformance = async (
     timeSpent: number,
     antiCheat: AntiCheatLog
 ): Promise<{ score: SkillDNAScore; feedback: string }> => {
+    const ai = getAiClient();
     const prompt = `Evaluate the user's performance for ${domain}. 
     Task: ${taskSummary}
     Solution: ${solutionSummary}
@@ -152,6 +166,7 @@ export const evaluatePerformance = async (
 };
 
 export const generateChallengeScenario = async (domain: SkillDomain): Promise<{ taskDescription: string, checkpoints: ChallengeCheckpoint[] }> => {
+    const ai = getAiClient();
     const prompt = `Create a coding challenge for ${domain} with incremental checkpoints.`;
     const response = await withRetry<GenerateContentResponse>(() => ai.models.generateContent({
         model: REASONING_MODEL,
@@ -184,6 +199,7 @@ export const generateChallengeScenario = async (domain: SkillDomain): Promise<{ 
 };
 
 export const validateChallengeStep = async (domain: SkillDomain, stepTitle: string, code: string): Promise<{ success: boolean, score: number, feedback: string }> => {
+    const ai = getAiClient();
     const prompt = `Validate the code for step "${stepTitle}" in ${domain}. Code: ${code}`;
     const response = await withRetry<GenerateContentResponse>(() => ai.models.generateContent({
         model: GENERATION_MODEL,
@@ -205,6 +221,7 @@ export const validateChallengeStep = async (domain: SkillDomain, stepTitle: stri
 };
 
 export const generateInterviewQuestion = async (domain: SkillDomain, lastScore: number, roundNum: number): Promise<{ text: string, timeLimit: number }> => {
+     const ai = getAiClient();
      const prompt = `Generate interview question #${roundNum} for ${domain}. Previous score: ${lastScore}.`;
      const response = await withRetry<GenerateContentResponse>(() => ai.models.generateContent({
         model: GENERATION_MODEL,
@@ -225,6 +242,7 @@ export const generateInterviewQuestion = async (domain: SkillDomain, lastScore: 
 };
 
 export const evaluateInterviewResponse = async (domain: SkillDomain, question: string, answer: string): Promise<{ score: number, feedback: string, spokenFeedback: string }> => {
+    const ai = getAiClient();
     const prompt = `Evaluate answer for ${domain}. Question: ${question}. Answer: ${answer}.`;
     const response = await withRetry<GenerateContentResponse>(() => ai.models.generateContent({
         model: GENERATION_MODEL,
@@ -246,6 +264,7 @@ export const evaluateInterviewResponse = async (domain: SkillDomain, question: s
 };
 
 export const generateExamMCQs = async (domain: SkillDomain): Promise<ExamMCQ[]> => {
+    const ai = getAiClient();
     const prompt = `Generate 20 MCQ questions for ${domain}.`;
     const response = await withRetry<GenerateContentResponse>(() => ai.models.generateContent({
         model: REASONING_MODEL,
@@ -281,6 +300,7 @@ export const generateExamMCQs = async (domain: SkillDomain): Promise<ExamMCQ[]> 
 };
 
 export const generateExamTheory = async (domain: SkillDomain): Promise<ExamTheory[]> => {
+     const ai = getAiClient();
      const prompt = `Generate 5 theory questions for ${domain}.`;
      const response = await withRetry<GenerateContentResponse>(() => ai.models.generateContent({
         model: REASONING_MODEL,
@@ -311,6 +331,7 @@ export const generateExamTheory = async (domain: SkillDomain): Promise<ExamTheor
 };
 
 export const generateExamPractical = async (domain: SkillDomain): Promise<ExamPractical[]> => {
+    const ai = getAiClient();
     const prompt = `Generate 2 practical coding tasks for ${domain}.`;
     const response = await withRetry<GenerateContentResponse>(() => ai.models.generateContent({
         model: REASONING_MODEL,
@@ -345,6 +366,7 @@ export const generateExamPractical = async (domain: SkillDomain): Promise<ExamPr
 };
 
 export const gradeExamSections = async (domain: SkillDomain, theory: ExamTheory[], practical: ExamPractical[]): Promise<{ theoryScore: number, practicalScore: number, feedback: string }> => {
+    const ai = getAiClient();
     const prompt = `Grade the theory and practical sections for ${domain}. Theory: ${JSON.stringify(theory)}. Practical: ${JSON.stringify(practical)}.`;
     const response = await withRetry<GenerateContentResponse>(() => ai.models.generateContent({
         model: REASONING_MODEL,
