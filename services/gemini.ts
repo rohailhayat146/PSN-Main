@@ -1,4 +1,3 @@
-
 import { GoogleGenAI, Type, GenerateContentResponse } from "@google/genai";
 import { SkillDomain, SkillDNAScore, AntiCheatLog, ExamMCQ, ExamTheory, ExamPractical, ChallengeCheckpoint } from '../types';
 
@@ -181,7 +180,7 @@ export const evaluatePerformance = async (
     return parseResponse(response.text);
 };
 
-// --- COMPETITIVE EXAM GENERATION (ULTRA-RIGOROUS) ---
+// --- COMPETITIVE EXAM GENERATION (OPTIMIZED FOR SPEED) ---
 
 export const generateExamMCQs = async (domain: SkillDomain): Promise<ExamMCQ[]> => {
     const ai = getAiClient();
@@ -193,7 +192,8 @@ export const generateExamMCQs = async (domain: SkillDomain): Promise<ExamMCQ[]> 
     - Format: Deterministic JSON.`;
     
     const response = await withRetry<GenerateContentResponse>(() => ai.models.generateContent({
-        model: REASONING_MODEL,
+        // Switched to GENERATION_MODEL (flash) for faster exam initialization
+        model: GENERATION_MODEL,
         contents: prompt,
         config: {
             responseMimeType: "application/json",
@@ -232,7 +232,8 @@ export const generateExamTheory = async (domain: SkillDomain): Promise<ExamTheor
      Format: Deterministic JSON.`;
      
      const response = await withRetry<GenerateContentResponse>(() => ai.models.generateContent({
-        model: REASONING_MODEL,
+        // Switched to GENERATION_MODEL (flash) for faster exam initialization
+        model: GENERATION_MODEL,
         contents: prompt,
         config: {
             responseMimeType: "application/json",
@@ -265,7 +266,8 @@ export const generateExamPractical = async (domain: SkillDomain): Promise<ExamPr
     Level: Expert. Constraints must involve high-concurrency, memory-efficiency, and strict API compliance.`;
     
     const response = await withRetry<GenerateContentResponse>(() => ai.models.generateContent({
-        model: REASONING_MODEL,
+        // Switched to GENERATION_MODEL (flash) for faster exam initialization
+        model: GENERATION_MODEL,
         contents: prompt,
         config: {
             responseMimeType: "application/json",
